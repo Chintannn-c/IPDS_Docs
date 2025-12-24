@@ -49,3 +49,4 @@ app.*.map.json
 .env.local
 .env.production
 .env.development
+.gemini
