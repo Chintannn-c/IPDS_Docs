@@ -1,0 +1,31 @@
+# Core
+fastapi
+uvicorn[standard]
+pymongo
+
+# Authentication & Security
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+cryptography
+
+# Data Processing
+scikit-learn
+pandas
+numpy
+
+# Validation
+pydantic[email]
+email-validator
+
+# Utilities
+python-dotenv
+aiofiles
+mistralai
+pymupdf
+
+# Security Enhancements (IPDS v2)
+# Note: These are optional but recommended for full feature set
+# geoip2          # MaxMind GeoIP (requires license)
+# httpx           # Async HTTP client for external APIs
+# slowapi          # Alternative rate limiter with Redis support

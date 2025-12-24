@@ -1,0 +1,99 @@
+gradle-wrapper.jar
+/.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks
+# ===============================
+# Environment & Secrets (CRITICAL)
+# ===============================
+.env
+.env.*
+*.pem
+*.key
+secrets/
+config/secrets/
+
+# ===============================
+# Flutter / Dart
+# ===============================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+build/
+
+# ===============================
+# Android
+# ===============================
+android/.gradle/
+android/local.properties
+android/key.properties
+*.jks
+
+# ===============================
+# iOS / macOS
+# ===============================
+ios/Pods/
+ios/Runner.xcworkspace
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/engine/
+ios/Flutter/flutter_export_environment.sh
+macos/Pods/
+
+# ===============================
+# Backend (Node / Python)
+# ===============================
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# ===============================
+# AI / OCR / ML Outputs
+# ===============================
+models/
+checkpoints/
+outputs/
+*.onnx
+*.pt
+
+# ===============================
+# Logs & Reports
+# ===============================
+logs/
+*.log
+reports/
+tmp/
+
+# ===============================
+# Database & Cache
+# ===============================
+*.db
+*.sqlite
+.cache/
+redis-data/
+
+# ===============================
+# OS & Editor Files
+# ===============================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ===============================
+# Git
+# ===============================
+*.orig
