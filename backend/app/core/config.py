@@ -15,6 +15,7 @@ class Settings:
     SMTP_USER = os.getenv("SMTP_USER", "")  # Your Gmail address
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")  # Gmail App Password
     SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "SecureStorage IPDS")
+    SMTP_SENDER = os.getenv("SMTP_USER", "") # Primary sender email
     
     # MFA OTP Settings
     MFA_OTP_LENGTH = 6

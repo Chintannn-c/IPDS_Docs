@@ -11,6 +11,7 @@ import '../../../core/api/api_client.dart';
 import '../../../../core/presentation/widgets/app_toast.dart'; // Add this import
 import 'summary_provider.dart';
 import 'widgets/ai_loading_animation.dart';
+import 'widgets/note_editor_screen.dart';
 
 class DocumentAnalysisScreen extends StatefulWidget {
   final String fileId;
@@ -30,7 +31,6 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
   Map<String, dynamic>? _analysis;
   List<Map<String, dynamic>> _history = [];
   bool _isLoading = true;
-  bool _isSaving = false;
   String? _error;
   String? _summaryId; // ID of the saved summary if applicable
 
@@ -55,10 +55,105 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
         });
       } catch (e) {
         // If not found, trigger a new analysis
-        final data = await ApiClient().analyzeFile(widget.fileId);
-        setState(() {
-          _analysis = data;
-        });
+        try {
+          final data = await ApiClient().analyzeFile(widget.fileId);
+          setState(() {
+            _analysis = data;
+          });
+        } catch (analyzeError) {
+          // Extract detailed error message from backend
+          String errorMessage = 'Failed to analyze document';
+
+          if (analyzeError.toString().contains('DioException')) {
+            // Try to extract the actual error message from response
+            final errorStr = analyzeError.toString();
+            if (errorStr.contains('detail')) {
+              // Extract JSON detail if present
+              final detailMatch = RegExp(
+                r'"detail":"([^"]+)"',
+              ).firstMatch(errorStr);
+              if (detailMatch != null) {
+                errorMessage = detailMatch.group(1) ?? errorMessage;
+              }
+            } else if (errorStr.contains('message')) {
+              final msgMatch = RegExp(
+                r'"message":"([^"]+)"',
+              ).firstMatch(errorStr);
+              if (msgMatch != null) {
+                errorMessage = msgMatch.group(1) ?? errorMessage;
+              }
+            }
+          } else {
+            errorMessage = analyzeError.toString();
+          }
+
+          // Show error dialog and navigate back
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+
+            await showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                title: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red, size: 28),
+                    SizedBox(width: 12),
+                    Text('Analysis Failed'),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Unable to analyze this document:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 12),
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        errorMessage,
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'Possible reasons:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    _buildErrorReason('File not found or deleted'),
+                    _buildErrorReason('Unsupported file format'),
+                    _buildErrorReason('File is corrupted or encrypted'),
+                    _buildErrorReason('File belongs to another user'),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Navigator.pop(context); // Go back to previous screen
+                    },
+                    child: Text('OK'),
+                  ),
+                ],
+              ),
+            );
+          }
+          return; // Exit early, don't continue
+        }
       }
 
       // Load history
@@ -80,6 +175,24 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Widget _buildErrorReason(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, bottom: 4),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 6, color: Colors.grey),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCannotSummarizeDialog() {
@@ -180,31 +293,6 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
     }
   }
 
-  Future<void> _saveSummary() async {
-    if (_analysis == null) return;
-    setState(() => _isSaving = true);
-    try {
-      final result = await ApiClient().saveSummary(
-        widget.fileId,
-        widget.filename,
-        _analysis!,
-      );
-      AppToast.success(context, 'Summary saved to history');
-      await _loadHistory();
-      setState(() {
-        _summaryId = result['_id'];
-      });
-      if (mounted) {
-        context.read<SummaryProvider>().addSummaryFromData(result);
-        context.read<SummaryProvider>().fetchHistory();
-      }
-    } catch (e) {
-      AppToast.error(context, 'Failed to save: $e');
-    } finally {
-      setState(() => _isSaving = false);
-    }
-  }
-
   Future<void> _reSummarize() async {
     setState(() => _isLoading = true);
     try {
@@ -234,14 +322,20 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
     if (_summaryId == null) {
       AppToast.warning(
         context,
-        'Please save the summary first to download PDF',
+        'Summary is being generated. Please wait a moment.',
       );
       return;
     }
 
     try {
       final bytes = await ApiClient().exportSummaryPdf(_summaryId!);
-      final filename = 'summary_${_analysis?['document_name'] ?? 'report'}.pdf';
+
+      // Create unique filename with timestamp to avoid duplicates
+      final now = DateTime.now();
+      final timestamp =
+          '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+      final baseFilename = _analysis?['document_name'] ?? 'report';
+      final filename = 'summary_${baseFilename}_$timestamp.pdf';
 
       if (kIsWeb) {
         // Web download
@@ -439,13 +533,9 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
               children: [
                 _buildFileHeader(),
                 const SizedBox(height: 20),
-                // Show analysis metadata if available
-                if (_analysis!['analysis_confidence'] != null ||
-                    _analysis!['security_status'] != null)
-                  _buildAnalysisMetadata(),
-                if (_analysis!['analysis_confidence'] != null ||
-                    _analysis!['security_status'] != null)
-                  const SizedBox(height: 20),
+                // AI Analysis Panel - New Enhanced Section
+                _buildAIAnalysisPanel(),
+                const SizedBox(height: 20),
                 _buildSummarySection(),
                 const SizedBox(height: 20),
                 _buildKeyPointsSection(),
@@ -472,55 +562,28 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
   }
 
   Widget _buildActionButtons() {
-    return Column(
+    return Row(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isSaving ? null : _saveSummary,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save),
-                label: const Text('SAVE SUMMARY'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                ),
-              ),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _reSummarize,
+            icon: const Icon(Icons.restart_alt),
+            label: const Text('RE-SUMMARIZE'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _reSummarize,
-                icon: const Icon(Icons.restart_alt),
-                label: const Text('RE-SUMMARIZE'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _downloadPdf,
+            icon: const Icon(Icons.picture_as_pdf),
+            label: const Text('DOWNLOAD PDF'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _downloadPdf,
-                icon: const Icon(Icons.picture_as_pdf),
-                label: const Text('DOWNLOAD PDF'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ],
     );
@@ -565,18 +628,37 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
   }
 
   Widget _buildSummarySection() {
+    // Safe string extraction
+    String getSummaryText() {
+      final value = _analysis!['summary'];
+      if (value == null) return 'No summary available.';
+      if (value is String) return value;
+      if (value is Map || value is List) return 'No summary available.';
+      return value.toString();
+    }
+
     return _buildCard(
       title: 'SECURITY-SAFE SUMMARY',
       icon: Icons.summarize,
       child: Text(
-        _analysis!['summary'] ?? 'No summary available.',
+        getSummaryText(),
         style: const TextStyle(height: 1.5, fontSize: 15),
       ),
     );
   }
 
   Widget _buildKeyPointsSection() {
-    final points = List<String>.from(_analysis!['key_points'] ?? []);
+    // Safe list extraction
+    List<String> getKeyPoints() {
+      final value = _analysis!['key_points'];
+      if (value == null) return [];
+      if (value is List) {
+        return value.whereType<String>().toList();
+      }
+      return [];
+    }
+
+    final points = getKeyPoints();
     return _buildCard(
       title: 'KEY INSIGHTS',
       icon: Icons.lightbulb,
@@ -607,7 +689,17 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
   }
 
   Widget _buildRiskFlagsSection() {
-    final flags = List<String>.from(_analysis!['risk_flags'] ?? []);
+    // Safe list extraction
+    List<String> getRiskFlags() {
+      final value = _analysis!['risk_flags'];
+      if (value == null) return [];
+      if (value is List) {
+        return value.whereType<String>().toList();
+      }
+      return [];
+    }
+
+    final flags = getRiskFlags();
     return _buildCard(
       title: 'SECURITY SCAN RESULTS',
       icon: Icons.security,
@@ -661,6 +753,15 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
   }
 
   Widget _buildPreviewSection() {
+    // Safe string extraction
+    String getPreviewText() {
+      final value = _analysis!['content_preview'];
+      if (value == null) return 'No preview available.';
+      if (value is String) return value;
+      if (value is Map || value is List) return 'No preview available.';
+      return value.toString();
+    }
+
     return _buildCard(
       title: 'CLEAN CONTENT PREVIEW',
       icon: Icons.remove_red_eye,
@@ -672,7 +773,7 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          _analysis!['content_preview'] ?? 'No preview available.',
+          getPreviewText(),
           style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
         ),
       ),
@@ -719,150 +820,561 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
     );
   }
 
-  Widget _buildAnalysisMetadata() {
-    final confidence =
-        _analysis!['analysis_confidence']?.toString().toUpperCase() ??
-        'UNKNOWN';
-    final securityStatus =
-        _analysis!['security_status']?.toString().toUpperCase() ?? 'UNKNOWN';
-    final extractionMethod = _analysis!['text_source']
-        ?.toString()
-        .toUpperCase();
-    final ocrExecuted = _analysis!['ocr_executed'] == true;
+  Widget _buildAIAnalysisPanel() {
+    // Safe extraction with type checking and fallbacks - enhanced version
+    String getSafeString(dynamic value, String fallback) {
+      if (value == null) return fallback;
+      if (value is String) return value;
+      // Handle Map and List - these should return fallback, not toString()
+      if (value is Map || value is List) return fallback;
+      // For primitives (int, double, bool), convert safely
+      if (value is num || value is bool) return value.toString();
+      // Last resort - but this should rarely be hit
+      try {
+        return value.toString();
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    final documentType = getSafeString(_analysis!['document_type'], 'Document');
+    final detectedStructure = getSafeString(
+      _analysis!['detected_structure'],
+      'Unknown',
+    );
+    final sensitivityLevel = getSafeString(
+      _analysis!['sensitivity_level'],
+      'Low',
+    );
+    final language = getSafeString(_analysis!['language'], 'English');
+    final extractionMethod = getSafeString(
+      _analysis!['extraction_method'],
+      'Text-based',
+    );
+    final confidence = getSafeString(
+      _analysis!['analysis_confidence'],
+      'unknown',
+    ).toUpperCase();
+    final securityStatus = getSafeString(
+      _analysis!['security_status'],
+      'unknown',
+    ).toUpperCase();
 
     Color confidenceColor = Colors.grey;
-    if (confidence == 'HIGH') confidenceColor = Colors.green;
-    if (confidence == 'MEDIUM') confidenceColor = Colors.orange;
-    if (confidence == 'LOW') confidenceColor = Colors.red;
+    IconData confidenceIcon = Icons.help_outline;
+    if (confidence == 'HIGH') {
+      confidenceColor = const Color(0xFF10B981);
+      confidenceIcon = Icons.verified;
+    }
+    if (confidence == 'MEDIUM') {
+      confidenceColor = const Color(0xFFF59E0B);
+      confidenceIcon = Icons.report_problem;
+    }
+    if (confidence == 'LOW') {
+      confidenceColor = const Color(0xFFEF4444);
+      confidenceIcon = Icons.error;
+    }
 
     Color securityColor = Colors.grey;
-    if (securityStatus == 'SAFE') securityColor = Colors.green;
-    if (securityStatus == 'SUSPICIOUS') securityColor = Colors.orange;
-    if (securityStatus == 'RISKY') securityColor = Colors.red;
+    IconData securityIcon = Icons.shield_outlined;
+    if (securityStatus == 'SAFE') {
+      securityColor = const Color(0xFF10B981);
+      securityIcon = Icons.shield;
+    }
+    if (securityStatus == 'SUSPICIOUS') {
+      securityColor = const Color(0xFFF59E0B);
+      securityIcon = Icons.shield_moon;
+    }
+    if (securityStatus == 'RISKY') {
+      securityColor = const Color(0xFFEF4444);
+      securityIcon = Icons.gpp_bad;
+    }
 
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+    Color sensitivityColor = Colors.grey;
+    IconData sensitivityIcon = Icons.security;
+    if (sensitivityLevel.toUpperCase() == 'LOW') {
+      sensitivityColor = const Color(0xFF10B981);
+      sensitivityIcon = Icons.lock_open;
+    }
+    if (sensitivityLevel.toUpperCase() == 'MEDIUM') {
+      sensitivityColor = const Color(0xFFF59E0B);
+      sensitivityIcon = Icons.lock_clock;
+    }
+    if (sensitivityLevel.toUpperCase() == 'HIGH') {
+      sensitivityColor = const Color(0xFFEF4444);
+      sensitivityIcon = Icons.lock;
+    }
+
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  const Color(0xFF1E293B).withOpacity(0.8),
+                  const Color(0xFF0F172A).withOpacity(0.9),
+                ]
+              : [const Color(0xFFF8FAFC), const Color(0xFFE2E8F0)],
         ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withOpacity(0.1)
+              : Colors.black.withOpacity(0.05),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _buildMetadataBadge(
-                    'Confidence',
-                    confidence,
-                    confidenceColor,
-                    Icons.analytics,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildMetadataBadge(
-                    'Security',
-                    securityStatus,
-                    securityColor,
-                    Icons.shield,
-                  ),
-                ),
-                if (extractionMethod != null) const SizedBox(width: 12),
-                if (extractionMethod != null)
-                  Expanded(
-                    child: _buildMetadataBadge(
-                      'Method',
-                      extractionMethod,
-                      Colors.blue,
-                      Icons.text_fields,
-                    ),
-                  ),
-              ],
+            // Subtle pattern overlay
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.03,
+                child: CustomPaint(painter: _DotPatternPainter()),
+              ),
             ),
-            if (ocrExecuted) const SizedBox(height: 12),
-            if (ocrExecuted)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.purple.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.document_scanner,
-                      color: Colors.purple,
-                      size: 16,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'OCR PROCESSING APPLIED',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple.shade700,
+            // Main content
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header with gradient
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              theme.colorScheme.primary,
+                              theme.colorScheme.primary.withOpacity(0.7),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: theme.colorScheme.primary.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.psychology,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ShaderMask(
+                              shaderCallback: (bounds) => LinearGradient(
+                                colors: [
+                                  theme.colorScheme.primary,
+                                  theme.colorScheme.secondary,
+                                ],
+                              ).createShader(bounds),
+                              child: const Text(
+                                'AI ANALYSIS PANEL',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Powered by Advanced AI',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: theme.colorScheme.outline,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Document Info Cards
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildInfoCard(
+                          'Document Type',
+                          documentType,
+                          Icons.description_rounded,
+                          const Color(0xFF3B82F6),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildInfoCard(
+                          'Structure',
+                          detectedStructure,
+                          Icons.account_tree_rounded,
+                          const Color(0xFF8B5CF6),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Status Badges - Premium Design
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withOpacity(0.05)
+                          : Colors.black.withOpacity(0.02),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.08)
+                            : Colors.black.withOpacity(0.05),
                       ),
                     ),
-                  ],
-                ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'STATUS METRICS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildPremiumBadge(
+                                'Confidence',
+                                confidence,
+                                confidenceColor,
+                                confidenceIcon,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildPremiumBadge(
+                                'Security',
+                                securityStatus,
+                                securityColor,
+                                securityIcon,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildPremiumBadge(
+                                'Sensitivity',
+                                sensitivityLevel.toUpperCase(),
+                                sensitivityColor,
+                                sensitivityIcon,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Metadata Section
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildMetadataChip(
+                          language,
+                          Icons.language_rounded,
+                          const Color(0xFFEC4899),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildMetadataChip(
+                          extractionMethod,
+                          Icons.text_snippet_rounded,
+                          extractionMethod.toUpperCase().contains('OCR')
+                              ? const Color(0xFFFF6B6B)
+                              : const Color(0xFF06B6D4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMetadataBadge(
+  Widget _buildInfoCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(isDark ? 0.15 : 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.outline,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPremiumBadge(
     String label,
     String value,
     Color color,
     IconData icon,
   ) {
-    return Column(
-      children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            color: Theme.of(context).colorScheme.outline,
-          ),
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withOpacity(isDark ? 0.2 : 0.1),
+            color.withOpacity(isDark ? 0.15 : 0.05),
+          ],
         ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: color,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.outline,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetadataChip(String text, IconData icon, Color color) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(isDark ? 0.2 : 0.1),
+            color.withOpacity(isDark ? 0.15 : 0.05),
+          ],
         ),
-      ],
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildNotesSection() {
-    return _buildCard(
-      title: 'ANALYSIS NOTES',
-      icon: Icons.info_outline,
-      child: Text(
-        _analysis!['notes'] ?? '',
-        style: TextStyle(
-          height: 1.5,
-          fontSize: 14,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final notesContent = _analysis!['notes'] ?? '';
+
+    return InkWell(
+      onTap: () {
+        if (notesContent.isNotEmpty) {
+          _showNotesDetailPage();
+        }
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: _buildCard(
+        title: 'ANALYSIS NOTES',
+        icon: Icons.info_outline,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              notesContent,
+              style: TextStyle(
+                height: 1.5,
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (notesContent.length > 100) ...[
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Tap to read full note',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
+
+  void _showNotesDetailPage() {
+    final notesContent = _analysis!['notes'] ?? '';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NoteEditorScreen(
+          initialContent: notesContent,
+          title: 'Analysis Notes',
+        ),
+      ),
+    );
+  }
+}
+
+// Custom painter for subtle dot pattern background
+class _DotPatternPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.5)
+      ..strokeWidth = 1.5;
+
+    const spacing = 20.0;
+    for (double x = 0; x < size.width; x += spacing) {
+      for (double y = 0; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), 1, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -98,4 +98,15 @@ class SummaryProvider extends ChangeNotifier {
     _summaries.insert(0, Summary.fromJson(data));
     notifyListeners();
   }
+
+  Future<void> deleteSummary(String summaryId) async {
+    try {
+      await ApiClient().deleteSummary(summaryId);
+      _summaries.removeWhere((summary) => summary.id == summaryId);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error deleting summary: $e');
+      rethrow;
+    }
+  }
 }

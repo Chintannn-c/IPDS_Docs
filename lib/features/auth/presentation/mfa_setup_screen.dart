@@ -1002,64 +1002,88 @@ class _MFASetupScreenState extends State<MFASetupScreen>
 
   Widget _buildOTPBox(int index, Color accentColor) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Explicit text color that will be visible
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return Container(
       width: 40,
       height: 52,
       margin: EdgeInsets.symmetric(
         horizontal: index == 2 || index == 3 ? 4 : 2,
       ),
-      child: TextField(
-        controller: _otpControllers[index],
-        focusNode: _otpFocusNodes[index],
-        keyboardType: TextInputType.number,
-        textAlign: TextAlign.center,
-        maxLength: 1,
+      // Wrap in DefaultTextStyle to override theme
+      child: DefaultTextStyle.merge(
         style: TextStyle(
           fontSize: 22,
           fontWeight: FontWeight.bold,
-          color: colorScheme.onSurface,
+          color: textColor,
         ),
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(1),
-        ],
-        decoration: InputDecoration(
-          counterText: "",
-          filled: true,
-          fillColor: _otpControllers[index].text.isNotEmpty
-              ? accentColor.withOpacity(0.08)
-              : colorScheme.surface,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
+        child: TextField(
+          controller: _otpControllers[index],
+          focusNode: _otpFocusNodes[index],
+          autofocus: index == 0,
+          enabled: true,
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          maxLength: 1,
+          // Explicit cursor color
+          cursorColor: textColor,
+          // Triple-layer styling to ensure visibility
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: textColor,
+            // Force color with decoration
+            decoration: TextDecoration.none,
+            decorationColor: textColor,
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: _otpControllers[index].text.isNotEmpty
-                  ? accentColor.withOpacity(0.5)
-                  : colorScheme.outline.withOpacity(0.3),
-              width: 1.5,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(1),
+          ],
+          decoration: InputDecoration(
+            counterText: "",
+            filled: true,
+            fillColor: _otpControllers[index].text.isNotEmpty
+                ? accentColor.withOpacity(0.08)
+                : colorScheme.surface,
+            // Add hintStyle to prevent theme override
+            hintText: "",
+            hintStyle: TextStyle(color: Colors.transparent),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: _otpControllers[index].text.isNotEmpty
+                    ? accentColor.withOpacity(0.5)
+                    : colorScheme.outline.withOpacity(0.3),
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: accentColor, width: 2),
             ),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: accentColor, width: 2),
-          ),
+          onChanged: (value) {
+            setState(() {});
+            if (value.isNotEmpty && index < 5) {
+              _otpFocusNodes[index + 1].requestFocus();
+            }
+            if (value.isEmpty && index > 0) {
+              _otpFocusNodes[index - 1].requestFocus();
+            }
+            // Auto-submit when all 6 digits entered
+            if (_otpCode.length == 6) {
+              FocusScope.of(context).unfocus();
+            }
+          },
         ),
-        onChanged: (value) {
-          setState(() {});
-          if (value.isNotEmpty && index < 5) {
-            _otpFocusNodes[index + 1].requestFocus();
-          }
-          if (value.isEmpty && index > 0) {
-            _otpFocusNodes[index - 1].requestFocus();
-          }
-          // Auto-submit when all 6 digits entered
-          if (_otpCode.length == 6) {
-            FocusScope.of(context).unfocus();
-          }
-        },
       ),
     );
   }

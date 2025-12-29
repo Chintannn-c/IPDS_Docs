@@ -161,8 +161,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
         );
       },
-      onDismissed: (_) {
-        // provider.deleteSummary(item.id);
+      onDismissed: (_) async {
+        try {
+          await provider.deleteSummary(item.id);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Summary deleted successfully')),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+          }
+        }
       },
       background: Container(
         padding: const EdgeInsets.only(right: 20),
@@ -200,6 +213,54 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   'filename': item.documentName,
                 },
               );
+            },
+            onLongPress: () async {
+              // Show delete confirmation on long press
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text("Delete Summary?"),
+                  content: Text(
+                    "Are you sure you want to delete this summary?\n\n${item.documentName}",
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text("Cancel"),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text("Delete"),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirmed == true && context.mounted) {
+                try {
+                  await provider.deleteSummary(item.id);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Summary deleted successfully'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to delete: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              }
             },
             child: Padding(
               padding: const EdgeInsets.all(16),

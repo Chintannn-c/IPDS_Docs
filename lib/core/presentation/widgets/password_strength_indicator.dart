@@ -160,12 +160,12 @@ class PasswordStrengthIndicator extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withOpacity(0.05)
             : Colors.grey.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,10 +177,10 @@ class PasswordStrengthIndicator extends StatelessWidget {
               // Animated strength icon
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
@@ -188,31 +188,39 @@ class PasswordStrengthIndicator extends StatelessWidget {
                     _getStrengthIcon(result.strength),
                     key: ValueKey(result.strength),
                     color: color,
-                    size: 20,
+                    size: 18,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
 
               // Progress bar and label
-              Expanded(
+              Flexible(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Password Strength',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurface.withOpacity(0.7),
+                        Flexible(
+                          child: Text(
+                            'Password Strength',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.7,
+                              ),
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        const SizedBox(width: 8),
                         AnimatedDefaultTextStyle(
                           duration: const Duration(milliseconds: 200),
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: color,
                           ),
@@ -220,7 +228,7 @@ class PasswordStrengthIndicator extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
 
                     // Segmented progress bar
                     Row(
@@ -232,15 +240,15 @@ class PasswordStrengthIndicator extends StatelessWidget {
                               milliseconds: 200 + (index * 50),
                             ),
                             curve: Curves.easeOutCubic,
-                            height: 6,
-                            margin: EdgeInsets.only(right: index < 4 ? 4 : 0),
+                            height: 5,
+                            margin: EdgeInsets.only(right: index < 4 ? 3 : 0),
                             decoration: BoxDecoration(
                               color: isActive
                                   ? color
                                   : (isDark
                                         ? Colors.white.withOpacity(0.1)
                                         : Colors.black.withOpacity(0.08)),
-                              borderRadius: BorderRadius.circular(3),
+                              borderRadius: BorderRadius.circular(2.5),
                             ),
                           ),
                         );
@@ -253,7 +261,7 @@ class PasswordStrengthIndicator extends StatelessWidget {
           ),
 
           if (showRequirements) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
 
             // Requirements as a clean list
             ...buildRequirementsList(result, theme, isDark),
@@ -330,17 +338,17 @@ class _RequirementItem extends StatelessWidget {
     final unmetColor = isDark ? Colors.grey[500]! : Colors.grey[600]!;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 250),
             curve: Curves.easeOutBack,
-            width: 20,
-            height: 20,
+            width: 18,
+            height: 18,
             decoration: BoxDecoration(
               color: isMet ? metColor.withOpacity(0.15) : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(9),
               border: Border.all(
                 color: isMet ? metColor : unmetColor.withOpacity(0.4),
                 width: 1.5,
@@ -352,18 +360,18 @@ class _RequirementItem extends StatelessWidget {
                   ? Icon(
                       Icons.check_rounded,
                       key: const ValueKey('check'),
-                      size: 14,
+                      size: 12,
                       color: metColor,
                     )
                   : const SizedBox.shrink(key: ValueKey('empty')),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
+          const SizedBox(width: 8),
+          Flexible(
             child: AnimatedDefaultTextStyle(
               duration: const Duration(milliseconds: 200),
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: isMet ? FontWeight.w500 : FontWeight.w400,
                 color: isMet
                     ? (isDark
@@ -372,7 +380,7 @@ class _RequirementItem extends StatelessWidget {
                     : (isDark ? Colors.grey[500] : Colors.grey[600]),
                 decoration: isMet ? TextDecoration.none : TextDecoration.none,
               ),
-              child: Text(label),
+              child: Text(label, overflow: TextOverflow.ellipsis, maxLines: 1),
             ),
           ),
         ],

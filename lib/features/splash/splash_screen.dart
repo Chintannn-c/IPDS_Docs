@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get/get.dart';
 import '../auth/presentation/auth_provider.dart';
+import '../../core/services/biometric_service.dart';
 
 /// Splash screen shown when app launches
 class SplashScreen extends StatefulWidget {
@@ -83,8 +84,19 @@ class _SplashScreenState extends State<SplashScreen>
     // 3. Final navigation check
     // If logged in (restored or already active), go to dashboard
     if (auth.isLoggedIn) {
-      debugPrint('[Splash] Navigating to Dashboard');
-      Get.offAllNamed('/dashboard');
+      // Check if token was restored (not fresh login)
+      final token = await const FlutterSecureStorage().read(
+        key: 'access_token',
+      );
+
+      // If token exists and user didn't just log out, require biometric auth
+      if (token != null && !BiometricService.isLogout) {
+        debugPrint('[Splash] Session restored - Navigating to Biometric Lock');
+        Get.offAllNamed('/biometric-lock');
+      } else {
+        debugPrint('[Splash] Navigating to Dashboard');
+        Get.offAllNamed('/dashboard');
+      }
     } else {
       debugPrint('[Splash] Navigating to Login');
       Get.offAllNamed('/login');

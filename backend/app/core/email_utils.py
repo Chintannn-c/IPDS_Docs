@@ -7,15 +7,7 @@ from email.mime.multipart import MIMEMultipart
 import random
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-SMTP_HOST = os.getenv("SMTP_HOST")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "IPDS Docs")
-
+from app.core.config import settings
 
 def generate_otp(length: int = 6) -> str:
     """
@@ -43,6 +35,13 @@ def send_otp_email(to_email: str, otp: str, purpose: str = "general") -> bool:
     print("="*60 + "\n")
     
     try:
+        # SMTP configuration from settings
+        host = settings.SMTP_HOST
+        port = settings.SMTP_PORT
+        user = settings.SMTP_USER
+        password = settings.SMTP_PASSWORD
+        from_name = settings.SMTP_FROM_NAME
+
         # Customize subject and body based on purpose
         if purpose == "enable_mfa":
             subject = "Enable Two-Factor Authentication - Verification Code"
@@ -87,26 +86,32 @@ If you did not request a password reset, please ignore this email and your passw
             body = f"Your OTP is: {otp}\n\nThis OTP is valid for a limited time."
 
         msg = MIMEMultipart()
-        msg['From'] = f"{SMTP_FROM_NAME} <{SMTP_USER}>"
+        msg['From'] = f"{from_name} <{user}>"
         msg['To'] = to_email
         msg['Subject'] = subject
 
         msg.attach(MIMEText(body, 'plain'))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        # Mask user for logging
+        masked_user = f"{user[:3]}***@{user.split('@')[-1]}" if user and '@' in user else "unknown"
+
+        with smtplib.SMTP(host, port) as server:
             server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.login(user, password)
             server.send_message(msg)
 
-        print(f"✅ [SUCCESS] OTP email sent to {to_email}")
+        print(f"✅ [SUCCESS] OTP email sent to {to_email} (via {host} as {masked_user})")
         return True
 
     except Exception as e:
+        # Mask user for logging
+        masked_user = f"{settings.SMTP_USER[:3]}***@{settings.SMTP_USER.split('@')[-1]}" if settings.SMTP_USER and '@' in settings.SMTP_USER else "unknown"
+        
         print("\n" + "⚠️"*30)
         print(f"❌ [ERROR] Failed to send OTP email: {e}")
         print(f"📧 Email was supposed to go to: {to_email}")
         print(f"🔢 OTP CODE (use this): {otp}")
-        print(f"💡 SMTP Config: Host={SMTP_HOST}, Port={SMTP_PORT}, User={SMTP_USER}")
+        print(f"💡 SMTP Config: Host={settings.SMTP_HOST}, Port={settings.SMTP_PORT}, User={masked_user}")
         print("⚠️"*30 + "\n")
         return False
 
@@ -120,6 +125,13 @@ def send_security_alert_email(to_email: str, alert_message: str, change_password
     try:
         subject = "⚠️ Security Alert: Suspicious Activity Detected"
         
+        # Use settings
+        host = settings.SMTP_HOST
+        port = settings.SMTP_PORT
+        user = settings.SMTP_USER
+        password = settings.SMTP_PASSWORD
+        from_name = settings.SMTP_FROM_NAME
+
         # Plain text version
         body_text = f"""Dear User,
 
@@ -136,7 +148,7 @@ How to change your password:
 If you did not attempt to login, someone may be trying to access your account.
 
 Best regards,
-{SMTP_FROM_NAME} Team
+{from_name} Team
 """
 
         # HTML version with instructions (mobile-friendly)
@@ -209,7 +221,7 @@ Best regards,
         </p>
         
         <div class="footer">
-            <p>Best regards,<br><strong>{SMTP_FROM_NAME} Team</strong></p>
+            <p>Best regards,<br><strong>{from_name} Team</strong></p>
             <p style="font-size: 11px;">If you did not request this email, please ignore it.</p>
         </div>
     </div>
@@ -218,7 +230,7 @@ Best regards,
 """
 
         msg = MIMEMultipart('alternative')
-        msg['From'] = f"{SMTP_FROM_NAME} <{SMTP_USER}>"
+        msg['From'] = f"{from_name} <{user}>"
         msg['To'] = to_email
         msg['Subject'] = subject
 
@@ -226,15 +238,20 @@ Best regards,
         msg.attach(MIMEText(body_text, 'plain'))
         msg.attach(MIMEText(html_body, 'html'))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        # Mask user for logging
+        masked_user = f"{user[:3]}***@{user.split('@')[-1]}" if user and '@' in user else "unknown"
+
+        with smtplib.SMTP(host, port) as server:
             server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.login(user, password)
             server.send_message(msg)
 
-        print(f"[DEBUG] Security alert with Change Password button sent to {to_email}")
+        print(f"✅ [SUCCESS] Security alert sent to {to_email} (via {host} as {masked_user})")
         return True
 
     except Exception as e:
-        print(f"[ERROR] Failed to send security alert email: {e}")
+        # Mask user for logging
+        masked_user = f"{settings.SMTP_USER[:3]}***@{settings.SMTP_USER.split('@')[-1]}" if settings.SMTP_USER and '@' in settings.SMTP_USER else "unknown"
+        print(f"❌ [ERROR] Failed to send security alert email to {to_email}: {e} (Host={settings.SMTP_HOST}, User={masked_user})")
         return False
 

@@ -428,6 +428,9 @@ class AuthProvider with ChangeNotifier {
       }
       DeviceController.to.setLoggedIn(true);
 
+      // Enable biometric authentication for next app startup
+      BiometricService.enable();
+
       _isLoading = false;
       notifyListeners();
       return {'success': true, 'isNewDevice': isNewDevice};

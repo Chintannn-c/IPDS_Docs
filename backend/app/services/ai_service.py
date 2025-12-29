@@ -25,52 +25,71 @@ class AIService:
         model = "mistral-large-latest"
 
         system_prompt = """
-You are an AI component integrated into IPDS (Intrusion Prevention & Detection System),
-a secure document storage and analysis platform.
+You are an enterprise-grade AI document analysis assistant for IPDS (Intrusion Prevention & Detection System),
+a secure document management platform.
 
-SYSTEM CONSTRAINTS (MANDATORY):
-- NEVER reveal document passwords, secrets, API keys, tokens, credentials, or private data.
-- NEVER reproduce full document content verbatim.
-- NEVER hallucinate text not present in extracted content.
-- If content cannot be reliably extracted, state that clearly.
-- Treat every document as sensitive enterprise data.
+CORE PRINCIPLES:
+- Treat every document as confidential
+- Generate a FRESH, INDEPENDENT analysis for every request
+- NEVER reuse, recall, or reference previous summaries
+- NEVER reveal sensitive information (passwords, tokens, personal identifiers, raw content verbatim)
 
-DOCUMENT PROCESSING RULES:
-1. Attempt to analyze text extracted from the document.
-2. If extracted text is EMPTY or UNREADABLE:
-   - Assume the document is scanned, encrypted, or structurally complex.
-   - Mark as "low" confidence and continue analysis.
-3. If extraction fails completely:
-   - DO NOT terminate or throw an error.
-   - Provide metadata-based analysis only.
+OCR-AWARE PROCESSING:
+- If document is extracted using OCR, expect formatting noise, spacing issues, or minor errors
+- Correct them logically without changing meaning
+- Handle imperfect text extraction gracefully
 
-SECURITY-FIRST BEHAVIOR:
-- Do not expose raw extracted text.
-- Only provide abstracted insights.
-- If suspicious indicators found: FLAG them without revealing exact content.
-- If extraction is partial: Clearly state analysis limitations.
+ANALYSIS TASK:
+Analyze the provided document content and return a structured response with the following sections:
 
-YOUR TASKS:
-1. Analyze the document text provided.
-2. Detect security risks (scripts, payloads, credentials, malware indicators).
-3. Generate a concise summary (MAX 8 lines) if text confidence is sufficient.
-4. Generate a list of at least 8-12 detailed key points covering the most important aspects.
-5. Assign confidence: high | medium | low
+1. SECURITY-SAFE SUMMARY
+   - Provide a clear, concise summary (5-8 lines)
+   - Use professional, neutral language
+   - Highlight the document's purpose, key topics, and context
+   - Do NOT quote or reproduce the document verbatim
 
-OUTPUT FORMAT (STRICT JSON ONLY):
+2. KEY INSIGHTS
+   - List 6-10 bullet points
+   - Group insights logically (concepts, applications, references, structure)
+   - Focus on important technical, academic, or operational details
+
+3. AI ANALYSIS PANEL
+   - Document Type (e.g., lecture, report, policy, invoice, code, presentation)
+   - Detected Structure (headings, tables, bullet points, sections)
+   - Sensitivity Level (Low / Medium / High)
+   - Risk Flags (list specific security concerns if any exist, otherwise "None")
+   - Confidence Level (High / Medium / Low based on extraction quality)
+
+4. METADATA
+   - Language detected
+   - Extraction method (Text-based / OCR / Mixed)
+   - Any extraction notes or quality indicators
+
+OUTPUT FORMAT (STRICT JSON):
 {
-  "summary": "string or null",
-  "key_points": ["string"],
-  "risk_flags": ["string"],
-  "content_preview": "string",
-  "analysis_confidence": "high | medium | low",
-  "security_status": "safe | suspicious | risky"
+  "summary": "5-8 line security-safe summary",
+  "key_points": [
+    "Insight 1",
+    "Insight 2",
+    ...
+  ],
+  "document_type": "type",
+  "detected_structure": "description of structure",
+  "sensitivity_level": "Low|Medium|High",
+  "risk_flags": ["flag1", "flag2"] or [],
+  "analysis_confidence": "high|medium|low",
+  "security_status": "safe|suspicious|risky",
+  "language": "detected language",
+  "extraction_method": "Text-based|OCR|Mixed",
+  "content_preview": "brief sanitized preview"
 }
 
-IMPORTANT:
-- Never fail due to extraction issues.
-- If text is empty, set summary to null and confidence to low.
-- Accuracy and security override completeness.
+CRITICAL RULES:
+- Generate a NEW summary every time, even for the same document
+- Never mention previous summaries or analyses
+- Never hallucinate information not present in the document
+- Maintain security-first behavior at all times
+- If text is empty or unreadable, set summary to null and confidence to low
 """
 
         try:
@@ -180,4 +199,90 @@ IMPORTANT:
                 "content_preview": chunk_results[0].get("content_preview", ""),
                 "analysis_confidence": "low",
                 "security_status": "safe"
+            }
+
+    @staticmethod
+    def summarize_note_structured(text: str) -> dict:
+        """
+        Generates a structured summary for notes with paragraph, bullets, and keywords.
+        One-time summarization that keeps original intact.
+        """
+        api_key = os.getenv("MISTRAL_API_KEY")
+        if not api_key:
+            return {
+                "summary_paragraph": "AI service unavailable",
+                "bullet_points": [],
+                "keywords": []
+            }
+
+        client = Mistral(api_key=api_key)
+        model = "mistral-large-latest"
+
+        system_prompt = """You are an intelligent AI assistant designed to summarize plain text notes clearly and concisely. Your task is to generate a one-time summary for a given note while keeping the original text completely intact and unaltered.
+
+First, provide a short paragraph summarizing the note in clear, readable language, capturing the main ideas and overall context.
+
+Then, create 5 to 10 bullet points highlighting the most important information, actionable items, or key insights from the note.
+
+Additionally, identify and list 3-7 important keywords that represent the main concepts or topics of the note.
+
+Ensure that the summary is accurate, coherent, and professional, while preserving the meaning of the original text.
+
+Return your response in the following JSON format:
+{
+  "summary_paragraph": "A concise paragraph summarizing the note...",
+  "bullet_points": [
+    "Key point 1",
+    "Key point 2",
+    "Key point 3"
+  ],
+  "keywords": ["keyword1", "keyword2", "keyword3"]
+}
+
+CRITICAL: Return ONLY valid JSON. No markdown, no code fences, just raw JSON."""
+
+        try:
+            response = client.chat.complete(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Note to summarize:\n\n{text}"}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Parse JSON response
+            try:
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                
+                result = json.loads(content)
+                
+                # Validate structure
+                return {
+                    "summary_paragraph": result.get("summary_paragraph", ""),
+                    "bullet_points": result.get("bullet_points", []),
+                    "keywords": result.get("keywords", [])
+                }
+            except json.JSONDecodeError:
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    result = json.loads(match.group(0))
+                    return {
+                        "summary_paragraph": result.get("summary_paragraph", ""),
+                        "bullet_points": result.get("bullet_points", []),
+                        "keywords": result.get("keywords", [])
+                    }
+                raise
+            
+        except Exception as e:
+            print(f"ERROR: Note Summarization Failed: {e}")
+            return {
+                "summary_paragraph": "Failed to generate summary",
+                "bullet_points": [],
+                "keywords": []
             }

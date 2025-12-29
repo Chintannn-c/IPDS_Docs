@@ -117,6 +117,29 @@ class EventLog(BaseModel):
     device_info: str
     risk_level: str
 
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    is_summarized: Optional[bool] = None
+    summary_paragraph: Optional[str] = None
+    bullet_points: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
+    original_content: Optional[str] = None
+
+class ItemBase(BaseModel):
+    name: str
+    description: str
+    type: str = "text"
+    is_summarized: bool = False
+    summary_paragraph: Optional[str] = None
+    bullet_points: List[str] = []
+    keywords: List[str] = []
+    original_content: Optional[str] = None
+    owner_id: str
+    created_at: datetime
+    updated_at: datetime
+
 class Folder(BaseModel):
     id: str
     name: str
@@ -139,6 +162,12 @@ class Item(BaseModel):
     description: str
     type: str = "text"
     owner_id: str
+    is_summarized: bool = False
+    summary_paragraph: Optional[str] = None
+    bullet_points: List[str] = []
+    keywords: List[str] = []
+    original_content: Optional[str] = None
+
 
 
 class LogActor(BaseModel):

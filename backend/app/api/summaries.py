@@ -1,21 +1,64 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, BackgroundTasks
 from app.services.auth_service import oauth2_scheme, get_current_user
 from app.services.encryption_service import decrypt_data
 from app.db.database import Database
 from app.models.schemas import DocumentSummary, SummarizedBy, SummarySaveRequest
+from app.models.task_models import SummarizationTask, TaskStatus
 from app.services.ai_service import AIService
 from datetime import datetime, timezone
 import os
 import fitz  # PyMuPDF
 from bson import ObjectId
 import io
+from PIL import Image
+import pytesseract
+import hashlib
+from uuid import uuid4
+from app.websocket_manager import manager
 
 router = APIRouter()
 
 UPLOAD_DIR = "uploads"
 
-def extract_text_from_file(file_path: str, filename: str) -> str:
-    """Extracts text from various file formats."""
+# In-memory task storage (use Redis in production for persistence)
+tasks_store = {}
+
+def compute_file_hash(file_path: str) -> str:
+    """Compute SHA256 hash of file for cache validation."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+def extract_text_with_ocr(file_path: str, filename: str, decrypted_data: bytes) -> str:
+    """Extracts text from PDF using OCR when text layer is insufficient."""
+    try:
+        print(f"[OCR] Starting OCR extraction for: {filename}")
+        doc = fitz.open(stream=decrypted_data, filetype="pdf")
+        ocr_text = ""
+        
+        for page_num, page in enumerate(doc):
+            # Extract page as image
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better OCR
+            img_data = pix.tobytes("png")
+            
+            # Convert to PIL Image
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Run OCR
+            page_text = pytesseract.image_to_string(img, lang='eng')
+            ocr_text += f"\n--- Page {page_num + 1} ---\n{page_text}"
+            
+        doc.close()
+        print(f"[OCR] Extracted {len(ocr_text)} characters from {page_num + 1} pages")
+        return ocr_text
+    except Exception as e:
+        print(f"[OCR] Error during OCR extraction: {e}")
+        return ""
+
+def extract_text_from_file(file_path: str, filename: str, file_record: dict = None) -> str:
+    """Extracts text from various file formats with OCR fallback and smart caching."""
     ext = os.path.splitext(filename)[1].lower()
     
     # Decrypt first
@@ -25,16 +68,61 @@ def extract_text_from_file(file_path: str, filename: str) -> str:
     decrypted_data = decrypt_data(encrypted_data)
     
     if ext == ".pdf":
+        # Check cache first
+        if file_record and file_record.get("ocr_cache"):
+            file_hash = compute_file_hash(file_path)
+            cache = file_record["ocr_cache"]
+            if cache.get("file_hash") == file_hash:
+                print(f"[CACHE] Using cached OCR text ({len(cache['text'])} chars)")
+                return cache["text"]
+            else:
+                print(f"[CACHE] File hash mismatch, cache invalidated")
+        
         try:
+            # First try normal text extraction
             doc = fitz.open(stream=decrypted_data, filetype="pdf")
             text = ""
             for page in doc:
                 text += page.get_text()
             doc.close()
+            
+            # If insufficient text, fallback to OCR
+            if len(text.strip()) < 50:
+                print(f"[OCR] Insufficient text extracted ({len(text)} chars), falling back to OCR...")
+                text = extract_text_with_ocr(file_path, filename, decrypted_data)
+                
+                # Cache OCR result
+                if file_record:
+                    db = Database.get_db()
+                    db.files.update_one(
+                        {"_id": file_record["_id"]},
+                        {"$set": {"ocr_cache": {
+                            "text": text,
+                            "extracted_at": datetime.now(timezone.utc),
+                            "file_hash": compute_file_hash(file_path)
+                        }}}
+                    )
+                    print(f"[CACHE] OCR text cached for future use")
+            else:
+                print(f"[TEXT] Extracted {len(text)} characters from PDF")
+            
             return text
         except Exception as e:
             print(f"Error extracting PDF text: {e}")
             return ""
+    
+    elif ext in [".jpg", ".jpeg", ".png"]:
+        # Direct OCR for image files
+        try:
+            print(f"[OCR] Processing image file: {filename}")
+            img = Image.open(io.BytesIO(decrypted_data))
+            text = pytesseract.image_to_string(img, lang='eng')
+            print(f"[OCR] Extracted {len(text)} characters from image")
+            return text
+        except Exception as e:
+            print(f"[OCR] Error extracting text from image: {e}")
+            return ""
+    
     elif ext in [".txt", ".md", ".py", ".dart", ".js", ".html", ".css"]:
         try:
             return decrypted_data.decode("utf-8")
@@ -113,6 +201,75 @@ async def get_summary(summary_id: str, current_user: dict = Depends(get_current_
     summary["_id"] = str(summary["_id"])
     return summary
 
+@router.post("/notes/summarize")
+async def summarize_note(
+    request: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Summarize note content using AI.
+    Does NOT save to history - just returns the summary text.
+    """
+    content = request.get("content", "")
+    
+    if not content or len(content.strip()) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Note content is too short to summarize (minimum 50 characters)"
+        )
+    
+    try:
+        # Use AI service to generate structured summary
+        ai_service = AIService()
+        result = ai_service.summarize_note_structured(content)
+        
+        # Validate result
+        if not result.get("summary_paragraph"):
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate summary"
+            )
+        
+        return {
+            "summary_paragraph": result.get("summary_paragraph", ""),
+            "bullet_points": result.get("bullet_points", []),
+            "keywords": result.get("keywords", []),
+            "success": True
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Summarization failed: {str(e)}"
+        )
+
+@router.delete("/{summary_id}")
+async def delete_summary(summary_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a summary from the database."""
+    db = Database.get_db()
+    try:
+        # Find the summary first to check ownership
+        summary = db.document_summaries.find_one({"_id": ObjectId(summary_id)})
+    except:
+        raise HTTPException(status_code=400, detail="Invalid summary ID")
+
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+        
+    # Check if the user owns this summary
+    if summary["summarized_by"]["user_id"] != str(current_user["_id"]):
+        raise HTTPException(status_code=403, detail="Unauthorized to delete this summary")
+
+    # Delete the summary
+    result = db.document_summaries.delete_one({"_id": ObjectId(summary_id)})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=500, detail="Failed to delete summary")
+    
+    print(f"[SUMMARIES] Deleted summary {summary_id} by user {current_user['email']}")
+    return {"message": "Summary deleted successfully", "deleted_id": summary_id}
+
+
 @router.post("/resummarize/{document_id}")
 async def resummarize(document_id: str, current_user: dict = Depends(get_current_user)):
     db = Database.get_db()
@@ -122,21 +279,19 @@ async def resummarize(document_id: str, current_user: dict = Depends(get_current
     if not file_record:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Extract text
-    text = extract_text_from_file(file_record["path"], file_record["filename"])
+    # Extract text with caching support
+    text = extract_text_from_file(file_record["path"], file_record["filename"], file_record)
     # Removed strict check to allow AI to handle empty text (e.g. image-only PDFs)
     if text is None:
         text = ""
 
-    # Analyze using Mistral
+    # Analyze using Mistral (ALWAYS FRESH - never cached)
     max_chars = 15000 
     truncated_text = text[:max_chars]
     # Failure-safe AI analysis - ensure we never crash on AI errors
     analysis = AIService.analyze_document(truncated_text) or {}
     
-    # Save as new version automatically or return for UI to save? 
-    # The requirement says "Stored as version + 1". So we save it.
-    
+    # Save as new version automatically
     last_summary = db.document_summaries.find_one(
         {"document_id": document_id},
         sort=[("version", -1)]
@@ -169,8 +324,172 @@ async def resummarize(document_id: str, current_user: dict = Depends(get_current
         {"$set": {"analysis": analysis, "analyzed_at": datetime.now(timezone.utc)}}
     )
     
-    
     return summary_doc
+
+# Background processing function
+async def process_summarization_background(task_id: str, document_id: str, user: dict):
+    """Background task to process document summarization asynchronously."""
+    try:
+        db = Database.get_db()
+        
+        # Update task status: EXTRACTING
+        tasks_store[task_id]["status"] = TaskStatus.EXTRACTING
+        tasks_store[task_id]["progress"] = 20
+        tasks_store[task_id]["updated_at"] = datetime.now(timezone.utc)
+        
+        # Send WebSocket update
+        await manager.send_personal_message(
+            {"type": "task_update", "task_id": task_id, "status": "extracting", "progress": 20},
+            user["_id"]
+        )
+        
+        # Get file record
+        file_record = db.files.find_one({"_id": document_id, "owner_id": user["_id"]})
+        if not file_record:
+            raise Exception("Document not found")
+        
+        # Extract text (with caching)
+        text = extract_text_from_file(file_record["path"], file_record["filename"], file_record)
+        if text is None:
+            text = ""
+        
+        # Update task status: ANALYZING
+        tasks_store[task_id]["status"] = TaskStatus.ANALYZING
+        tasks_store[task_id]["progress"] = 60
+        tasks_store[task_id]["updated_at"] = datetime.now(timezone.utc)
+        
+        await manager.send_personal_message(
+            {"type": "task_update", "task_id": task_id, "status": "analyzing", "progress": 60},
+            user["_id"]
+        )
+        
+        # Run AI analysis (ALWAYS FRESH)
+        max_chars = 15000
+        truncated_text = text[:max_chars]
+        analysis = AIService.analyze_document(truncated_text) or {}
+        
+        # Save summary
+        last_summary = db.document_summaries.find_one(
+            {"document_id": document_id},
+            sort=[("version", -1)]
+        )
+        new_version = (last_summary["version"] + 1) if last_summary else 1
+        
+        summary_doc = {
+            "document_id": document_id,
+            "document_name": file_record["filename"],
+            "summary": str(analysis.get("summary", "") or ""),
+            "key_points": analysis.get("key_points", []) or [],
+            "risk_flags": analysis.get("risk_flags", []) or [],
+            "content_preview": str(analysis.get("content_preview", "") or ""),
+            "version": new_version,
+            "summarized_by": {
+                "user_id": str(user["_id"]),
+                "user_email": user["email"]
+            },
+            "summarized_at": datetime.now(timezone.utc),
+            "ai_model": "mistral-large-latest"
+        }
+        
+        result = db.document_summaries.insert_one(summary_doc)
+        summary_doc["_id"] = str(result.inserted_id)
+        
+        # Update main file record
+        db.files.update_one(
+            {"_id": document_id},
+            {"$set": {"analysis": analysis, "analyzed_at": datetime.now(timezone.utc)}}
+        )
+        
+        # Update task status: COMPLETE
+        tasks_store[task_id]["status"] = TaskStatus.COMPLETE
+        tasks_store[task_id]["progress"] = 100
+        tasks_store[task_id]["result"] = summary_doc
+        tasks_store[task_id]["updated_at"] = datetime.now(timezone.utc)
+        
+        print(f"[TASK] Completed async summarization for task {task_id}")
+        
+        await manager.send_personal_message(
+            {"type": "task_complete", "task_id": task_id, "result": summary_doc},
+            user["_id"]
+        )
+        
+    except Exception as e:
+        print(f"[TASK] Error in background task {task_id}: {e}")
+        tasks_store[task_id]["status"] = TaskStatus.FAILED
+        tasks_store[task_id]["error"] = str(e)
+        tasks_store[task_id]["updated_at"] = datetime.now(timezone.utc)
+        
+        await manager.send_personal_message(
+            {"type": "task_failed", "task_id": task_id, "error": str(e)},
+            user["_id"]
+        )
+
+@router.post("/resummarize-async/{document_id}")
+async def resummarize_async(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Async endpoint for document summarization with background processing.
+    Returns immediately with task_id for status polling.
+    """
+    db = Database.get_db()
+    
+    # Verify document exists
+    file_record = db.files.find_one({"_id": document_id, "owner_id": current_user["_id"]})
+    if not file_record:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Create task
+    task_id = str(uuid4())
+    task = {
+        "task_id": task_id,
+        "document_id": document_id,
+        "document_name": file_record["filename"],
+        "status": TaskStatus.PENDING,
+        "progress": 0,
+        "result": None,
+        "error": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    tasks_store[task_id] = task
+    
+    # Add background task
+    background_tasks.add_task(
+        process_summarization_background,
+        task_id,
+        document_id,
+        current_user
+    )
+    
+    print(f"[TASK] Created async summarization task {task_id} for document {file_record['filename']}")
+    
+    return {
+        "task_id": task_id,
+        "status": "pending",
+        "message": "Summarization task started in background"
+    }
+
+@router.get("/tasks/{task_id}")
+async def get_task_status(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Get the status of an async summarization task."""
+    if task_id not in tasks_store:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = tasks_store[task_id]
+    return {
+        "task_id": task["task_id"],
+        "document_id": task["document_id"],
+        "document_name": task["document_name"],
+        "status": task["status"],
+        "progress": task["progress"],
+        "result": task["result"],
+        "error": task["error"],
+        "created_at": task["created_at"],
+        "updated_at": task["updated_at"]
+    }
 
 @router.get("/{summary_id}/export-pdf")
 async def export_pdf(summary_id: str, current_user: dict = Depends(get_current_user)):

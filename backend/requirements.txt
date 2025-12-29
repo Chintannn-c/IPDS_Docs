@@ -23,6 +23,8 @@ python-dotenv
 aiofiles
 mistralai
 pymupdf
+pytesseract
+Pillow
 
 # Security Enhancements (IPDS v2)
 # Note: These are optional but recommended for full feature set

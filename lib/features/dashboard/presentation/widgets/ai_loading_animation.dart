@@ -15,12 +15,14 @@ class _AILoadingAnimationState extends State<AILoadingAnimation>
   late AnimationController _textController;
 
   final List<String> _statusMessages = [
-    'READING DOCUMENT CONTENT...',
-    'EXTRACTING KEY ENTITIES...',
-    'SCANNIG FOR SECURITY RISKS...',
-    'IDENTIFYING CORE INSIGHTS...',
-    'SCRUBBING SENSITIVE DATA...',
-    'GENERATING AI SUMMARY...',
+    'READING YOUR DOCUMENT...',
+    'UNDERSTANDING THE CONTENT...',
+    'IDENTIFYING KEY INFORMATION...',
+    'ANALYZING DOCUMENT STRUCTURE...',
+    'CHECKING FOR SECURITY RISKS...',
+    'EXTRACTING IMPORTANT POINTS...',
+    'CREATING YOUR SUMMARY...',
+    'ALMOST DONE...',
   ];
 
   int _messageIndex = 0;

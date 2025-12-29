@@ -124,10 +124,10 @@ class _AllFilesScreenState extends State<AllFilesScreen> {
   Widget _buildHeader(BuildContext context) {
     return Container(
       padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + 12,
+        top: MediaQuery.of(context).padding.top + 0,
         left: ScreenUtils.spacing(context),
         right: ScreenUtils.spacing(context),
-        bottom: 12,
+        bottom: 6,
       ),
       child: Stack(
         alignment: Alignment.center,
@@ -135,7 +135,7 @@ class _AllFilesScreenState extends State<AllFilesScreen> {
           // Centered Title
           Center(
             child: Text(
-              "FILE VAULT",
+              "File Vault",
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,

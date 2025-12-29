@@ -24,7 +24,6 @@ class ItemsProvider extends ChangeNotifier {
       if (e.response?.statusCode == 401) return;
       debugPrint('Fetch Items Error: $e');
     } finally {
-      if (!_isLoading) return;
       _isLoading = false;
       notifyListeners();
     }
@@ -34,14 +33,29 @@ class ItemsProvider extends ChangeNotifier {
     String name,
     String description, {
     String type = 'text',
+    bool? isSummarized,
+    String? summaryParagraph,
+    String? originalContent,
   }) async {
     _isLoading = true;
     notifyListeners();
     try {
-      final response = await _dio.post(
-        '/items/',
-        data: {'name': name, 'description': description, 'type': type},
-      );
+      final Map<String, dynamic> data = {
+        'name': name,
+        'description': description,
+        'type': type,
+      };
+      if (isSummarized != null) {
+        data['is_summarized'] = isSummarized;
+      }
+      if (summaryParagraph != null) {
+        data['summary_paragraph'] = summaryParagraph;
+      }
+      if (originalContent != null) {
+        data['original_content'] = originalContent;
+      }
+
+      final response = await _dio.post('/items/', data: data);
       final newItem = Item.fromJson(response.data);
       _items.add(newItem);
       NotificationService().success("Item added successfully");
@@ -53,7 +67,6 @@ class ItemsProvider extends ChangeNotifier {
       NotificationService().error("Failed to add item");
       return false;
     } finally {
-      if (!_isLoading) return false;
       _isLoading = false;
       notifyListeners();
     }
@@ -63,15 +76,38 @@ class ItemsProvider extends ChangeNotifier {
     String id,
     String name,
     String description,
-    String type,
-  ) async {
+    String type, {
+    bool? isSummarized,
+    String? summaryParagraph,
+    List<String>? bulletPoints,
+    List<String>? keywords,
+    String? originalContent,
+  }) async {
     _isLoading = true;
     notifyListeners();
     try {
-      final response = await _dio.put(
-        '/items/$id',
-        data: {'name': name, 'description': description, 'type': type},
-      );
+      final Map<String, dynamic> data = {
+        'name': name,
+        'description': description,
+        'type': type,
+      };
+      if (isSummarized != null) {
+        data['is_summarized'] = isSummarized;
+      }
+      if (summaryParagraph != null) {
+        data['summary_paragraph'] = summaryParagraph;
+      }
+      if (bulletPoints != null) {
+        data['bullet_points'] = bulletPoints;
+      }
+      if (keywords != null) {
+        data['keywords'] = keywords;
+      }
+      if (originalContent != null) {
+        data['original_content'] = originalContent;
+      }
+
+      final response = await _dio.put('/items/$id', data: data);
       final updatedItem = Item.fromJson(response.data);
       final index = _items.indexWhere((item) => item.id == id);
       if (index != -1) {
@@ -84,7 +120,6 @@ class ItemsProvider extends ChangeNotifier {
       NotificationService().error("Failed to update item");
       return false;
     } finally {
-      if (!_isLoading) return false;
       _isLoading = false;
       notifyListeners();
     }

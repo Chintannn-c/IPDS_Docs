@@ -392,6 +392,18 @@ class ApiClient {
     return res.data as Uint8List;
   }
 
+  Future<void> deleteSummary(String summaryId) async {
+    await dio.delete('/summaries/$summaryId');
+  }
+
+  Future<Map<String, dynamic>> summarizeNoteContent(String content) async {
+    final res = await dio.post(
+      '/summaries/notes/summarize',
+      data: {'content': content},
+    );
+    return Map<String, dynamic>.from(res.data);
+  }
+
   // Helper to fetch images with headers (Ngrok/Auth)
   Future<Uint8List?> fetchImageBytes(String url) async {
     try {

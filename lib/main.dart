@@ -34,6 +34,7 @@ import 'package:file_stroage_system/features/dashboard/presentation/all_files_sc
 import 'package:file_stroage_system/features/auth/presentation/mfa_setup_screen.dart';
 import 'package:file_stroage_system/features/auth/presentation/change_password_screen.dart';
 import 'package:file_stroage_system/features/auth/presentation/forgot_password_screen.dart';
+import 'package:file_stroage_system/features/auth/presentation/biometric_lock_screen.dart';
 import 'package:file_stroage_system/features/items/presentation/add_item_screen.dart';
 import 'package:file_stroage_system/features/auth/presentation/device_trust_screen.dart';
 import 'package:file_stroage_system/features/ipds/presentation/screens/admin_ipds_dashboard.dart';
@@ -127,6 +128,7 @@ class MyApp extends StatelessWidget {
                   '/all_files': (context) => const AllFilesScreen(),
                   '/mfa_setup': (context) => const MFASetupScreen(),
                   '/change-password': (context) => const ChangePasswordScreen(),
+                  '/biometric-lock': (context) => const BiometricLockScreen(),
                   '/items': (context) => const ItemsScreen(),
                   '/items/add': (context) => const AddItemScreen(),
                   '/devices': (context) => const DeviceTrustScreen(),
@@ -135,12 +137,45 @@ class MyApp extends StatelessWidget {
                   '/history': (context) => const HistoryScreen(),
                   '/notifications': (context) => NotificationCenterScreen(),
                   '/document_analysis': (context) {
-                    final args =
-                        ModalRoute.of(context)!.settings.arguments
-                            as Map<String, dynamic>;
+                    final args = ModalRoute.of(context)?.settings.arguments;
+                    if (args == null || args is! Map<String, dynamic>) {
+                      // Fallback: navigate back to dashboard if args are invalid
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        Navigator.of(
+                          context,
+                        ).pushReplacementNamed('/dashboard');
+                      });
+                      return const Scaffold(
+                        body: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    // Safe string extraction helper
+                    String safeGetString(dynamic value, String fallback) {
+                      if (value == null) return fallback;
+                      if (value is String) return value;
+                      if (value is Map || value is List) return fallback;
+                      return value.toString();
+                    }
+
+                    final fileId = safeGetString(args['fileId'], '');
+                    final filename = safeGetString(args['filename'], 'Unknown');
+
+                    // Validate that we have required data
+                    if (fileId.isEmpty) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        Navigator.of(
+                          context,
+                        ).pushReplacementNamed('/dashboard');
+                      });
+                      return const Scaffold(
+                        body: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
                     return DocumentAnalysisScreen(
-                      fileId: args['fileId'],
-                      filename: args['filename'],
+                      fileId: fileId,
+                      filename: filename,
                     );
                   },
                 },
