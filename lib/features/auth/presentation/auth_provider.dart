@@ -336,7 +336,8 @@ class AuthProvider with ChangeNotifier {
   }
 
   // ================= LOGIN =================
-  Future<Map<String, dynamic>> login(
+  Future<Map<String, 
+  dynamic>> login(
     String email,
     String password, {
     String? deviceFingerprint,

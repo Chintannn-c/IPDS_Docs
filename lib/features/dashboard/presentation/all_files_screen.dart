@@ -230,22 +230,6 @@ class _AllFilesScreenState extends State<AllFilesScreen> {
                   alignment: Alignment.center,
                   clipBehavior: Clip.none,
                   children: [
-                    // Background glow for risky files
-                    if (isUnsafe)
-                      Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              (isQuarantined ? Colors.red : Colors.orange)
-                                  .withOpacity(0.15),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
                     Icon(
                       _getFileIcon(file['filename']),
                       size: 48,

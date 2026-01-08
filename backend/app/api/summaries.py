@@ -15,6 +15,9 @@ import pytesseract
 import hashlib
 from uuid import uuid4
 from app.websocket_manager import manager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from app.core.performance import timing_decorator
 
 router = APIRouter()
 
@@ -31,27 +34,60 @@ def compute_file_hash(file_path: str) -> str:
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
+@timing_decorator("OCR Extraction")
 def extract_text_with_ocr(file_path: str, filename: str, decrypted_data: bytes) -> str:
-    """Extracts text from PDF using OCR when text layer is insufficient."""
+    """Extracts text from PDF using OCR with parallel processing and adaptive resolution."""
     try:
         print(f"[OCR] Starting OCR extraction for: {filename}")
-        doc = fitz.open(stream=decrypted_data, filetype="pdf")
-        ocr_text = ""
         
-        for page_num, page in enumerate(doc):
+        # Parallel OCR processing for better performance
+        def process_page(page_num, pdf_bytes):
+            # Each thread opens its own document instance to avoid threading issues
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page = doc[page_num]
+            page_rect = page.rect
+            
+            # Adaptive resolution based on page size
+            # Small pages or detailed content get higher DPI
+            if page_rect.width < 400 or page_rect.height < 600:
+                zoom = 3  # High quality for small text
+            else:
+                zoom = 2  # Standard quality
+            
             # Extract page as image
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better OCR
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
             img_data = pix.tobytes("png")
             
-            # Convert to PIL Image
+            # Convert to PIL Image and run OCR
             img = Image.open(io.BytesIO(img_data))
-            
-            # Run OCR
             page_text = pytesseract.image_to_string(img, lang='eng')
-            ocr_text += f"\n--- Page {page_num + 1} ---\n{page_text}"
             
-        doc.close()
-        print(f"[OCR] Extracted {len(ocr_text)} characters from {page_num + 1} pages")
+            doc.close()  # Close this thread's document instance
+            return page_num, page_text
+        
+        # Get page count from a temporary document
+        temp_doc = fitz.open(stream=decrypted_data, filetype="pdf")
+        page_count = len(temp_doc)
+        temp_doc.close()
+        
+        # Process pages in parallel (up to 4 concurrent)
+        from app.core.config import settings
+        max_workers = min(settings.OCR_PARALLEL_PAGES, page_count)
+        
+        ocr_results = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_page, i, decrypted_data): i for i in range(page_count)}
+            for future in as_completed(futures):
+                page_num, page_text = future.result()
+                ocr_results[page_num] = page_text
+                print(f"[OCR] Completed page {page_num + 1}/{page_count}")
+        
+        # Reconstruct text in correct order
+        ocr_text = ""
+        for i in range(page_count):
+            ocr_text += f"\n--- Page {i + 1} ---\n{ocr_results[i]}"
+        
+        print(f"[OCR] Extracted {len(ocr_text)} characters from {page_count} pages")
         return ocr_text
     except Exception as e:
         print(f"[OCR] Error during OCR extraction: {e}")
@@ -82,13 +118,19 @@ def extract_text_from_file(file_path: str, filename: str, file_record: dict = No
             # First try normal text extraction
             doc = fitz.open(stream=decrypted_data, filetype="pdf")
             text = ""
+            page_count = len(doc)
             for page in doc:
                 text += page.get_text()
-            doc.close()
+            doc.close()  # Close after text extraction
             
-            # If insufficient text, fallback to OCR
-            if len(text.strip()) < 50:
-                print(f"[OCR] Insufficient text extracted ({len(text)} chars), falling back to OCR...")
+            # Smart OCR trigger based on text density
+            # Check if there's meaningful text content
+            word_count = len(text.strip().split())
+            char_density = len(text.strip()) / max(page_count, 1)
+            
+            # Trigger OCR if text is sparse or low density
+            if word_count < 20 or char_density < 10:
+                print(f"[OCR] Insufficient text (words: {word_count}, density: {char_density:.1f}), using OCR...")
                 text = extract_text_with_ocr(file_path, filename, decrypted_data)
                 
                 # Cache OCR result
@@ -284,12 +326,10 @@ async def resummarize(document_id: str, current_user: dict = Depends(get_current
     # Removed strict check to allow AI to handle empty text (e.g. image-only PDFs)
     if text is None:
         text = ""
-
-    # Analyze using Mistral (ALWAYS FRESH - never cached)
-    max_chars = 15000 
-    truncated_text = text[:max_chars]
-    # Failure-safe AI analysis - ensure we never crash on AI errors
-    analysis = AIService.analyze_document(truncated_text) or {}
+        
+    # Analyze using Mistral with chunking support for large documents
+    # Use chunked analysis to handle documents of any size (same as initial analysis)
+    analysis = AIService.analyze_document_chunked(text) or {}
     
     # Save as new version automatically
     last_summary = db.document_summaries.find_one(

@@ -20,5 +20,17 @@ class Settings:
     # MFA OTP Settings
     MFA_OTP_LENGTH = 6
     MFA_OTP_EXPIRE_MINUTES = 2
+    
+    # AI Configuration
+    AI_MODEL_STANDARD = os.getenv("AI_MODEL_STANDARD", "mistral-small-latest")
+    AI_MODEL_ADVANCED = os.getenv("AI_MODEL_ADVANCED", "mistral-large-latest")
+    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.3"))
+    AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "800"))
+    AI_TOP_P = float(os.getenv("AI_TOP_P", "0.9"))
+    
+    # OCR Configuration
+    OCR_DPI_STANDARD = int(os.getenv("OCR_DPI_STANDARD", "200"))
+    OCR_DPI_HIGH_QUALITY = int(os.getenv("OCR_DPI_HIGH_QUALITY", "300"))
+    OCR_PARALLEL_PAGES = int(os.getenv("OCR_PARALLEL_PAGES", "4"))
 
 settings = Settings()

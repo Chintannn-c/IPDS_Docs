@@ -420,26 +420,53 @@ def extract_text_from_file(file_path: str, filename: str) -> dict:
                 print(f"DEBUG: PDF text extraction returned empty. Triggering OCR for {filename}...")
                 ocr_executed = True
                 
-                # Convert PDF pages to images and run OCR
-                doc = fitz.open(stream=decrypted_data, filetype="pdf")
-                ocr_text = ""
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    # Render page to image (higher DPI for better OCR)
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for clarity
-                    img_data = pix.tobytes("png")
-                    
-                    # Run OCR on the image
-                    image = Image.open(io.BytesIO(img_data))
-                    page_text = pytesseract.image_to_string(image)
-                    ocr_text += f"\n--- Page {page_num + 1} ---\n{page_text}"
+                # Parallel OCR processing (thread-safe)
+                def process_page_ocr(page_num, pdf_bytes):
+                    """Each thread gets its own document instance (thread-safe)."""
+                    try:
+                        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        page = doc[page_num]
+                        
+                        # Render page to image (higher DPI for better OCR)
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom
+                        img_data = pix.tobytes("png")
+                        
+                        # Run OCR on the image
+                        image = Image.open(io.BytesIO(img_data))
+                        page_text = pytesseract.image_to_string(image)
+                        
+                        doc.close()  # Clean up this thread's document
+                        return page_num, page_text
+                    except Exception as e:
+                        print(f"[OCR] Error processing page {page_num}: {e}")
+                        return page_num, ""
                 
-                doc.close()
+                # Get page count safely
+                temp_doc = fitz.open(stream=decrypted_data, filetype="pdf")
+                page_count = len(temp_doc)
+                temp_doc.close()
+                
+                # Process pages in parallel (up to 4 concurrent)
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                max_workers = min(4, page_count)
+                
+                ocr_results = {}
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(process_page_ocr, i, decrypted_data): i for i in range(page_count)}
+                    for future in as_completed(futures):
+                        page_num, page_text = future.result()
+                        ocr_results[page_num] = page_text
+                        print(f"[OCR] Completed page {page_num + 1}/{page_count}")
+                
+                # Reconstruct text in correct order
+                ocr_text = ""
+                for i in range(page_count):
+                    ocr_text += f"\n--- Page {i + 1} ---\n{ocr_results.get(i, '')}"
                 
                 if ocr_text.strip():
                     extracted_text = ocr_text
                     text_source = "ocr"
-                    print(f"DEBUG: OCR successful. Extracted {len(ocr_text)} characters.")
+                    print(f"DEBUG: Parallel OCR successful. Extracted {len(ocr_text)} characters.")
                 else:
                     print(f"DEBUG: OCR also returned empty. Document may be image-only or encrypted.")
                     text_source = "none"

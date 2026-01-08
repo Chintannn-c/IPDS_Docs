@@ -1003,7 +1003,7 @@ class _DocumentAnalysisScreenState extends State<DocumentAnalysisScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Powered by Advanced AI',
+                              'Powered by Mistral AI',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: theme.colorScheme.outline,

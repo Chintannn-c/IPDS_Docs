@@ -1,8 +1,37 @@
+import json
 import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from mistralai import Mistral
 from app.core.config import settings
-import json
-import re
+
+# Valid security risk categories
+VALID_RISK_FLAGS = {
+    "leaked_credentials", "malware_code", "crypto_keys", "pii",
+    "config_leak", "suspicious_commands", "phishing", 
+    "configuration_error", "analysis_error"  # System errors
+}
+
+def _validate_analysis_result(result: dict) -> dict:
+    """Validate and normalize AI analysis result for consistency and accuracy."""
+    # Ensure risk_flags use valid categories only
+    if "risk_flags" in result:
+        valid_flags = [flag for flag in result["risk_flags"] if flag in VALID_RISK_FLAGS]
+        result["risk_flags"] = valid_flags
+    
+    # Normalize confidence levels
+    if "analysis_confidence" in result:
+        confidence = str(result["analysis_confidence"]).lower()
+        if confidence not in ["high", "medium", "low"]:
+            result["analysis_confidence"] = "medium"
+    
+    # Normalize security status
+    if "security_status" in result:
+        status = str(result["security_status"]).lower()
+        if status not in ["safe", "suspicious", "risky"]:
+            result["security_status"] = "safe"
+    
+    return result
 
 class AIService:
     @staticmethod
@@ -13,7 +42,7 @@ class AIService:
         api_key = os.getenv("MISTRAL_API_KEY")
         if not api_key:
             return {
-                "summary": null,
+                "summary": None,
                 "key_points": [],
                 "risk_flags": ["configuration_error"],
                 "content_preview": "System AI analysis unavailable: Missing API key.",
@@ -22,74 +51,70 @@ class AIService:
             }
 
         client = Mistral(api_key=api_key)
-        model = "mistral-large-latest"
+        # Use faster model for standard analysis (3-4x speed improvement)
+        model = settings.AI_MODEL_STANDARD
 
         system_prompt = """
-You are an enterprise-grade AI document analysis assistant for IPDS (Intrusion Prevention & Detection System),
-a secure document management platform.
+You are an intelligent document summarization AI for IPDS.
 
-CORE PRINCIPLES:
-- Treat every document as confidential
-- Generate a FRESH, INDEPENDENT analysis for every request
-- NEVER reuse, recall, or reference previous summaries
-- NEVER reveal sensitive information (passwords, tokens, personal identifiers, raw content verbatim)
+Your task is to generate a summary whose length and depth are dynamically proportional
+to the size, complexity, and information density of the provided document content.
 
-OCR-AWARE PROCESSING:
-- If document is extracted using OCR, expect formatting noise, spacing issues, or minor errors
-- Correct them logically without changing meaning
-- Handle imperfect text extraction gracefully
+ADAPTIVE RULES (CRITICAL):
+1. Do NOT use a fixed word or line limit.
+2. First estimate the document size using text length and topic density.
+3. Adjust summary length automatically:
+   - Very small content → very short summary
+   - Medium content → moderate summary
+   - Large content → detailed, multi-paragraph summary
+4. Preserve all key ideas, sections, and important details.
+5. Never add information that does not exist in the document.
+6. Handle OCR noise logically without inventing missing text.
+7. Maintain factual accuracy over creativity.
 
-ANALYSIS TASK:
-Analyze the provided document content and return a structured response with the following sections:
+SUMMARY DEPTH GUIDELINES:
+- < 500 words input → 3–5 sentence summary
+- 500–2,000 words → 1–2 short paragraphs
+- 2,000–8,000 words → multi-paragraph structured summary
+- > 8,000 words → comprehensive section-wise summary
 
-1. SECURITY-SAFE SUMMARY
-   - Provide a clear, concise summary (5-8 lines)
-   - Use professional, neutral language
-   - Highlight the document's purpose, key topics, and context
-   - Do NOT quote or reproduce the document verbatim
+STRUCTURE RULES:
+- For large documents, organize the summary by major sections or themes.
+- For small documents, provide a compact and direct summary.
+- Do not repeat information unnecessarily.
 
-2. KEY INSIGHTS
-   - List 6-10 bullet points
-   - Group insights logically (concepts, applications, references, structure)
-   - Focus on important technical, academic, or operational details
-
-3. AI ANALYSIS PANEL
-   - Document Type (e.g., lecture, report, policy, invoice, code, presentation)
-   - Detected Structure (headings, tables, bullet points, sections)
-   - Sensitivity Level (Low / Medium / High)
-   - Risk Flags (list specific security concerns if any exist, otherwise "None")
-   - Confidence Level (High / Medium / Low based on extraction quality)
-
-4. METADATA
-   - Language detected
-   - Extraction method (Text-based / OCR / Mixed)
-   - Any extraction notes or quality indicators
-
-OUTPUT FORMAT (STRICT JSON):
+RETURN STRICT JSON:
 {
-  "summary": "5-8 line security-safe summary",
-  "key_points": [
-    "Insight 1",
-    "Insight 2",
-    ...
-  ],
-  "document_type": "type",
+  "estimated_document_size": "small | medium | large | very_large",
+  "summary": "Adaptive-length summary based on document size",
+  "key_points": ["Key insight 1", "Key insight 2", "Key insight 3"],
+  "document_type": "lecture|report|policy|invoice|code|presentation|other",
   "detected_structure": "description of structure",
   "sensitivity_level": "Low|Medium|High",
-  "risk_flags": ["flag1", "flag2"] or [],
+  "risk_flags": ["leaked_credentials", "malware_code", "crypto_keys", "pii", "config_leak", "suspicious_commands", "phishing"] or [],
   "analysis_confidence": "high|medium|low",
   "security_status": "safe|suspicious|risky",
   "language": "detected language",
   "extraction_method": "Text-based|OCR|Mixed",
-  "content_preview": "brief sanitized preview"
+  "content_preview": "sanitized preview",
+  "coverage_note": "Brief note on how much of the document is covered (e.g., high-level, detailed, comprehensive)"
 }
 
-CRITICAL RULES:
-- Generate a NEW summary every time, even for the same document
-- Never mention previous summaries or analyses
-- Never hallucinate information not present in the document
-- Maintain security-first behavior at all times
-- If text is empty or unreadable, set summary to null and confidence to low
+SECURITY CATEGORIES (use exact strings):
+- leaked_credentials: passwords, API keys, tokens, secrets
+- malware_code: exploit code, malicious scripts
+- crypto_keys: hardcoded encryption keys
+- pii: personal identifiable information
+- config_leak: infrastructure/config exposure
+- suspicious_commands: harmful CLI instructions
+- phishing: social engineering indicators
+
+CONSTRAINTS:
+- No markdown in summary
+- No explanations
+- No fixed word counts
+- No hallucinations
+- Output must be valid JSON only
 """
 
         try:
@@ -98,27 +123,38 @@ CRITICAL RULES:
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"DOCUMENT CONTENT:\n----------------\n{text}\n----------------"}
+                    {"role": "user", "content": f"DOCUMENT CONTENT:\n{text}"}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=settings.AI_TEMPERATURE,  # More deterministic
+                top_p=settings.AI_TOP_P,              # Focused outputs
+                max_tokens=settings.AI_MAX_TOKENS     # Limit for speed
             )
             
             content = response.choices[0].message.content
-            print(f"DEBUG: Raw Response: {content}")
+            print(f"DEBUG: Raw Response: {content[:200]}...")  # Log first 200 chars only
 
-            # Robust JSON extraction
+            # Optimized JSON parsing - direct parse first
             try:
+                result = json.loads(content)
+                # Validate and normalize security flags
+                return _validate_analysis_result(result)
+            except json.JSONDecodeError:
+                # Fallback: strip markdown code blocks
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:
                     content = content.split("```")[1].split("```")[0].strip()
-                
-                return json.loads(content)
-            except json.JSONDecodeError:
-                match = re.search(r'\{.*\}', content, re.DOTALL)
-                if match:
-                    return json.loads(match.group(0))
-                raise
+                try:
+                    result = json.loads(content)
+                    return _validate_analysis_result(result)
+                except:
+                    # Last resort: regex extraction
+                    match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if match:
+                        result = json.loads(match.group(0))
+                        return _validate_analysis_result(result)
+                    raise
             
         except Exception as e:
             print(f"ERROR: System AI Analysis Failed: {e}")
@@ -135,6 +171,7 @@ CRITICAL RULES:
     def analyze_document_chunked(text: str, chunk_size: int = 15000) -> dict:
         """
         Analyzes a large document by chunking it and merging results.
+        Uses parallel processing for faster analysis.
         """
         if len(text) <= chunk_size:
             return AIService.analyze_document(text)
@@ -148,55 +185,97 @@ CRITICAL RULES:
         if len(chunks) == 10:
              print("DEBUG: Document is too large, limiting analysis to first 150,000 characters.")
 
-        chunk_results = []
-        for i, chunk in enumerate(chunks):
-            print(f"DEBUG: Processing chunk {i+1}/{len(chunks)}...")
-            result = AIService.analyze_document(chunk)
-            chunk_results.append(result)
+        # Parallel AI processing for faster analysis
+        
+        def analyze_chunk(chunk_index, chunk_text):
+            """Process a single chunk (thread-safe)."""
+            try:
+                print(f"DEBUG: Processing chunk {chunk_index+1}/{len(chunks)}...")
+                result = AIService.analyze_document(chunk_text)
+                return chunk_index, result
+            except Exception as e:
+                print(f"ERROR: Chunk {chunk_index+1} analysis failed: {e}")
+                return chunk_index, {
+                    "summary": "",
+                    "key_points": [],
+                    "risk_flags": [],
+                    "analysis_confidence": "low"
+                }
+        
+        # Process up to 3 chunks concurrently for faster analysis
+        max_workers = min(3, len(chunks))
+        chunk_results_dict = {}
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(analyze_chunk, i, chunk): i for i, chunk in enumerate(chunks)}
+            for future in as_completed(futures):
+                chunk_index, result = future.result()
+                chunk_results_dict[chunk_index] = result
+        
+        # Reconstruct results in correct order
+        chunk_results = [chunk_results_dict[i] for i in range(len(chunks))]
 
         # Merge Results
         combined_risk_flags = list(set([flag for res in chunk_results for flag in res.get("risk_flags", [])]))
+        
+        # Combine summaries for AI merging
         combined_summaries = "\n\n".join([f"Part {i+1}: {res.get('summary', '')}" for i, res in enumerate(chunk_results)])
+        
+        # Combine all key points from chunks
+        all_key_points = []
+        for res in chunk_results:
+            all_key_points.extend(res.get("key_points", []))
+        
+        # Get content preview from first chunk
+        content_preview = chunk_results[0].get("content_preview", "") if chunk_results else ""
         
         # Merge summaries using AI
         print("DEBUG: Merging chunk summaries...")
         merge_prompt = f"""
-        Below are summaries from different parts of a large document. 
-        Create a single, cohesive, enterprise-grade summary (concise) and a final set of unique key points.
-        Maintain security standards (no secrets/PII).
+    Below are summaries and key points from different parts of a large document. 
+    Create a single, cohesive summary and consolidate the key points into 6-10 unique insights.
+    Remove duplicates and maintain the most important information.
 
-        SUMMARIES:
-        {combined_summaries}
-        """
+    SUMMARIES:
+    {combined_summaries}
+    
+    KEY POINTS FROM ALL PARTS:
+    {chr(10).join([f"- {point}" for point in all_key_points[:30]])}
+    
+    Return JSON with 'summary' (adaptive length) and 'key_points' (6-10 unique consolidated points).
+    """
 
         try:
             api_key = os.getenv("MISTRAL_API_KEY")
             client = Mistral(api_key=api_key)
+            # Use advanced model for complex merging task
             response = client.chat.complete(
-                model="mistral-large-latest",
+                model=settings.AI_MODEL_ADVANCED,
                 messages=[
-                    {"role": "system", "content": "You are a senior security analyst merging document reports. Return JSON with 'summary' and 'key_points'."},
+                    {"role": "system", "content": "You are a senior analyst merging document reports. Return JSON with 'summary' and 'key_points'."},
                     {"role": "user", "content": merge_prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=0.4  # Slightly higher for creative merging
             )
             merged_data = json.loads(response.choices[0].message.content)
             
             return {
                 "summary": merged_data.get("summary", "Summary merge failed."),
-                "key_points": merged_data.get("key_points", []),
+                "key_points": merged_data.get("key_points", all_key_points[:10]),  # Fallback to combined points
                 "risk_flags": combined_risk_flags,
-                "content_preview": chunk_results[0].get("content_preview", ""),
+                "content_preview": content_preview,
                 "analysis_confidence": "medium",
                 "security_status": chunk_results[0].get("security_status", "safe")
             }
         except Exception as e:
-            print(f"ERROR: System AI Failed to merge summaries: {e}")
+            print(f"ERROR: Failed to merge summaries: {e}")
+            # Fallback: Use first chunk summary + combined key points
             return {
-                "summary": chunk_results[0].get("summary", "") + "... (Full summary merge failed)",
-                "key_points": chunk_results[0].get("key_points", []),
+                "summary": chunk_results[0].get("summary", "") + "\n\n(Note: Full merge unavailable, showing primary analysis)",
+                "key_points": all_key_points[:10],  # At least show combined key points
                 "risk_flags": combined_risk_flags,
-                "content_preview": chunk_results[0].get("content_preview", ""),
+                "content_preview": content_preview,
                 "analysis_confidence": "low",
                 "security_status": "safe"
             }
@@ -216,7 +295,8 @@ CRITICAL RULES:
             }
 
         client = Mistral(api_key=api_key)
-        model = "mistral-large-latest"
+        # Use faster model for notes (simpler task)
+        model = settings.AI_MODEL_STANDARD
 
         system_prompt = """You are an intelligent AI assistant designed to summarize plain text notes clearly and concisely. Your task is to generate a one-time summary for a given note while keeping the original text completely intact and unaltered.
 
@@ -248,7 +328,9 @@ CRITICAL: Return ONLY valid JSON. No markdown, no code fences, just raw JSON."""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Note to summarize:\n\n{text}"}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=settings.AI_TEMPERATURE,
+                top_p=settings.AI_TOP_P
             )
             
             content = response.choices[0].message.content
