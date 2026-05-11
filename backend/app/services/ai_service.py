@@ -42,10 +42,10 @@ class AIService:
     # Model definitions (Absolute Best-in-Class Stack)
     MODELS = {
         "groq": "llama-3.3-70b-versatile",
-        "gemini": "gemini-3.1-pro-preview",
-        "mistral": "mistral-large-latest",
-        "openrouter": "openai/gpt-5.5-pro", # The ultimate model found in current list
-        "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
+        "gemini": "gemini-3.1-flash-lite",
+        "reasoning": "openai/gpt-oss-120b:free",
+        "stability": "meta-llama/llama-3.3-70b-instruct:free",
+        "fastest": "z-ai/glm-4.5-air:free"
     }
 
     @staticmethod
@@ -61,15 +61,15 @@ class AIService:
                     genai.configure(api_key=api_key)
                     return genai.GenerativeModel(AIService.MODELS["gemini"])
                 return None
-            elif provider == "mistral":
-                api_key = os.getenv("MISTRAL_API_KEY")
-                return Mistral(api_key=api_key) if api_key else None
-            elif provider == "openrouter":
+            elif provider in ["reasoning", "stability", "fastest"]:
                 api_key = os.getenv("OPENROUTER_API_KEY")
                 return OpenAI(
                     base_url="https://openrouter.ai/api/v1",
                     api_key=api_key,
                 ) if api_key else None
+            elif provider == "mistral":
+                api_key = os.getenv("MISTRAL_API_KEY")
+                return Mistral(api_key=api_key) if api_key else None
             elif provider == "huggingface":
                 api_key = os.getenv("HUGGING_FACE_API_KEY")
                 return InferenceClient(token=api_key) if api_key else None
@@ -88,7 +88,7 @@ class AIService:
         model = AIService.MODELS.get(provider)
         
         start_time = time.time()
-        print(f"🤖 [AI] Attempting call with {provider.upper()} ({model})...")
+        print(f"[AI] Attempting call with {provider.upper()} ({model})...")
 
         if provider == "groq":
             response = client.chat.completions.create(
@@ -126,7 +126,7 @@ class AIService:
             )
             content = response.choices[0].message.content
             
-        elif provider == "openrouter":
+        elif provider in ["reasoning", "stability", "fastest", "openrouter"]:
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -150,14 +150,14 @@ class AIService:
             content = response
 
         duration = time.time() - start_time
-        print(f"✅ [AI] {provider.upper()} completed in {duration:.2f}s")
+        print(f"[AI] {provider.upper()} completed in {duration:.2f}s")
         return content
 
     @staticmethod
     def _orchestrate_ai(system_prompt: str, user_prompt: str) -> dict:
         """Proactive orchestration: Tries providers in order of preference (Failover)."""
-        # Order: Groq (Fastest) -> Gemini (Reliable) -> Mistral (Stable) -> OpenRouter -> HF
-        providers = ["groq", "gemini", "mistral", "openrouter", "huggingface"]
+        # Updated Order: Groq -> Gemini -> Reasoning -> Stability -> Fastest
+        providers = ["groq", "gemini", "reasoning", "stability", "fastest"]
         
         last_error = None
         for provider in providers:
@@ -185,11 +185,11 @@ class AIService:
                     raise ValueError(f"Provider {provider} returned invalid JSON.")
                     
             except Exception as e:
-                print(f"⚠️ [AI] {provider.upper()} failed: {e}")
+                print(f"[AI] {provider.upper()} failed: {e}")
                 last_error = e
                 continue # Try next provider
 
-        print(f"🚨 [AI] ALL PROVIDERS FAILED. Last error: {last_error}")
+        print(f"[AI] ALL PROVIDERS FAILED. Last error: {last_error}")
         return {
             "summary": "AI Analysis Unavailable",
             "key_points": ["System exhausted all available AI models", "Check API keys and internet connection"],

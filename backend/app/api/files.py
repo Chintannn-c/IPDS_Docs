@@ -565,7 +565,7 @@ async def analyze_file(file_id: str, current_user: dict = Depends(get_current_us
             "user_email": current_user["email"]
         },
         "summarized_at": datetime.now(timezone.utc),
-        "ai_model": "mistral-large-latest"
+        "ai_model": analysis.get("used_model", "unknown")
     }
     
     print(f"[FILES] Created initial summary v1 for: {file_record['filename']}")

@@ -2,20 +2,23 @@
 
 IPDS Docs is a high-security, intelligent document management and storage system. It combines state-of-the-art encryption with a **Proactive Multi-Model AI** engine to provide deep analysis, secure summarization, and real-time threat detection for your sensitive documents.
 
-## 🚀 Proactive Multi-Model AI
-The heart of IPDS Docs is its advanced AI orchestration layer, which utilizes a tiered failover system across multiple world-class providers. This ensures 100% uptime and the highest possible intelligence for every document.
+## 🚀 Proactive Multi-Model AI (Free-Tier Optimized)
+The heart of IPDS Docs is its advanced AI orchestration layer, which utilizes a tiered failover system across multiple world-class providers. This version is optimized for **100% Free-Tier usage** without sacrificing intelligence or speed.
 
-### 🦾 Elite AI Stack
-| Provider | Primary Model | Purpose |
-| :--- | :--- | :--- |
-| **Groq** | `llama-3.3-70b-versatile` | Instant-speed scanning and summarization. |
-| **Google** | `gemini-3.1-pro-preview` | Deep reasoning and large-context analysis. |
-| **OpenRouter** | `openai/gpt-5.5-pro` | Ultimate intelligence fallback for complex tasks. |
-| **Anthropic** | `claude-opus-4.7` | High-tier reasoning fallback. |
-| **Mistral** | `mistral-large-latest` | Stable, high-quality European AI. |
+### 🦾 Categorical AI Stack
+| Category | Model | Provider | Strengths |
+| :--- | :--- | :--- | :--- |
+| **Speed** | `llama-3.3-70b-versatile` | Groq | Instant-speed initial scanning. |
+| **Context** | `gemini-3.1-flash-lite` | Google | Deep reasoning & massive document support. |
+| **Reasoning** | `gpt-oss-120b:free` | OpenRouter | High-intelligence logic for complex reports. |
+| **Stability** | `llama-3.3-70b-instruct:free` | OpenRouter | Reliable structured JSON extraction. |
+| **Fastest** | `glm-4.5-air:free` | OpenRouter | High-performance fallback engine. |
 
-### 🛡️ Failover Logic
-If a primary model (like Groq) is rate-limited or down, the system **proactively** escalates to the next tier (Gemini Pro, then GPT-5.5 Pro) without any user intervention.
+### 🛡️ Smart Failover Logic
+The system automatically orchestrates between these models to ensure zero-cost, high-reliability analysis:
+1. **Primary**: Groq (Fastest) -> Google (Reliable)
+2. **Fallback**: OpenRouter Reasoning -> Stability -> Fastest (Best-in-class free models)
+This ensures 100% uptime and the highest possible intelligence for every document without requiring paid subscriptions.
 
 ## ✨ Features
 - **Intelligent Summarization**: Adaptive length summaries based on document complexity.
@@ -28,7 +31,7 @@ If a primary model (like Groq) is rate-limited or down, the system **proactively
 - **Frontend**: Flutter (Provider + GetX)
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB
-- **AI SDKs**: Groq, Google Generative AI, Mistral AI, OpenRouter, Hugging Face Hub
+- **AI SDKs**: Groq, Google GenAI, OpenRouter, Mistral AI
 
 ## 📦 Installation & Setup
 
@@ -44,7 +47,6 @@ If a primary model (like Groq) is rate-limited or down, the system **proactively
    GROQ_API_KEY=your_key
    GEMINI_API_KEY=your_key
    OPENROUTER_API_KEY=your_key
-   MISTRAL_API_KEY=your_key
    ```
 4. Start the server:
    ```bash

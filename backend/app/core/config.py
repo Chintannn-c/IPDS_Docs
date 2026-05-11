@@ -23,7 +23,7 @@ class Settings:
     
     # AI Configuration
     AI_MODEL_STANDARD = os.getenv("AI_MODEL_STANDARD", "mistral-small-latest")
-    AI_MODEL_ADVANCED = os.getenv("AI_MODEL_ADVANCED", "mistral-large-latest")
+    AI_MODEL_ADVANCED = os.getenv("AI_MODEL_ADVANCED", "meta-llama/llama-3.3-70b-instruct:free")
     AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.3"))
     AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "800"))
     AI_TOP_P = float(os.getenv("AI_TOP_P", "0.9"))

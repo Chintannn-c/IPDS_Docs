@@ -205,7 +205,7 @@ async def save_summary(req: SummarySaveRequest, current_user: dict = Depends(get
             "user_email": current_user["email"]
         },
         "summarized_at": datetime.now(timezone.utc),
-        "ai_model": "mistral-large-latest"
+        "ai_model": req.summary_data.get("used_model", "unknown")
     }
 
     print(f"[SUMMARIES] Saving summary v{new_version} for doc: {req.document_name}")
@@ -351,7 +351,7 @@ async def resummarize(document_id: str, current_user: dict = Depends(get_current
             "user_email": current_user["email"]
         },
         "summarized_at": datetime.now(timezone.utc),
-        "ai_model": "mistral-large-latest"
+        "ai_model": analysis.get("used_model", "unknown")
     }
 
     print(f"[SUMMARIES] Re-summarized v{new_version} for: {file_record['filename']}")
@@ -428,7 +428,7 @@ async def process_summarization_background(task_id: str, document_id: str, user:
                 "user_email": user["email"]
             },
             "summarized_at": datetime.now(timezone.utc),
-            "ai_model": "mistral-large-latest"
+            "ai_model": analysis.get("used_model", "unknown")
         }
         
         result = db.document_summaries.insert_one(summary_doc)

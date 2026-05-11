@@ -223,7 +223,7 @@ class DocumentSummary(BaseModel):
     version: int = 1
     summarized_by: SummarizedBy
     summarized_at: datetime = Field(default_factory=datetime.now)
-    ai_model: str = "mistral-large-latest"
+    ai_model: str = "groq:llama-3.3-70b-versatile"
 
 class SummarySaveRequest(BaseModel):
     document_id: str
