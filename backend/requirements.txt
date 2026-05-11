@@ -22,6 +22,10 @@ email-validator
 python-dotenv
 aiofiles
 mistralai
+google-generativeai
+groq
+huggingface_hub
+openai
 pymupdf
 pytesseract
 Pillow
